@@ -1,26 +1,22 @@
-"""Hermes messages -> what UniiChat's own importer (v1.0.137) takes.
+"""UniiChat (v1.0.137) message rules, ported from its JS (read-only study).
 
-Everything here mirrors the importer found in the Unii JS (read-only study):
-  * an import is a list of sessions; each starts with a note
-    {kind:"note", text:"<app> session in <where>, from <time> (imported)", date}
-    followed by {kind, text, date, more} lines, kind in user|unii|tool|echo;
+  * a Hermes session becomes a note {kind:"note", text:"<app> session in <where>, from <time> (imported)"}
+    followed by its messages, kind in user|unii|tool|echo, each with Hermes' own `date`;
   * a tool call is  "<name> <compact JSON args>", its result an echo;
-  * texts are paged at 30000 chars (more:true on all but the last page);
-  * Unii shows imported unii/tool messages as "ai" (another AI's).
-We write that body (unii-import.jsonl) and also Claude-Code-style session files, which
-`/import claude` already knows how to read, then port the importer's parser to prove
-both say the same thing.
+  * texts are paged at 30000 UTF-16 units (clip_pages; `more: true` on all but the last page);
+  * messages carry `imported: true`, so Unii shows imported unii/tool messages as "ai" (another AI's)
+    and its compactor bills their summaries as an "import" (the pausable queue);
+  * a message's `size` is the UTF-8 length of what Unii shows: "<who>: <text>".
 """
+import array
 import json
 import math
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
-CAP = 30000
-SKIP = re.compile(r"\A(<command-|<local-command|\[Request interrupted)")
-NODE, LINE = 512, 480                      # importer's cost model constants
-PRICE = dict(base=187, byte=735, depth=628)  # micro-dollars
+CAP = 30000                                # clip_pages page size, in UTF-16 code units
+NODE, LINE = 512, 480                      # summary line limit; importer's cost model line guess
+PRICE = dict(base=187, byte=735, depth=628)  # importer's cost model, micro-dollars per node
 
 
 @dataclass
@@ -40,10 +36,11 @@ class OutSession:
     where: str      # the "session in <where>" part
     start: str
     msgs: list = field(default_factory=list)
+    extra: bool = False   # optmem extras go after the real sessions
 
 
 def cut(text, n):
-    """Like Unii's own clip: head + marker + tail."""
+    """Head + marker + tail, like Unii's own clip."""
     if n <= 0 or len(text) <= n:
         return text
     keep = n // 2
@@ -62,142 +59,119 @@ def cut_args(obj, n):
 
 
 def jdump(x):
+    """JSON.stringify: no spaces, raw non-ASCII."""
     return json.dumps(x, separators=(",", ":"), ensure_ascii=False)
+
+
+def well_formed(text):
+    """String.prototype.toWellFormed: lone surrogates -> U+FFFD."""
+    return text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+
+
+def pages(text):
+    """Port of clip_pages/clip_end (JS string indexes are UTF-16 code units)."""
+    u = array.array("H")
+    u.frombytes(text.encode("utf-16-le", "surrogatepass"))
+    n, out, at = len(u), [], 0
+
+    def s(a, b):
+        return u[a:b].tobytes().decode("utf-16-le", "surrogatepass")
+    while True:
+        if n - at <= CAP:
+            end = n
+        else:
+            nl = -1
+            for k in range(at + CAP - 1, at - 1, -1):
+                if u[k] == 10:
+                    nl = k
+                    break
+            low = (u[at + CAP] >> 10) == 55
+            end = nl + 1 if nl >= at else at + CAP - (1 if low else 0)
+        out.append(s(at, end))
+        at = end
+        if at >= n:
+            return out
+
+
+def flat(text):
+    """Memory.flat: a multi-line text on one line."""
+    return re.sub(r"\s*\n\s*", " ", text) if "\n" in text else text
+
+
+def bytes_(text):
+    return len(text.encode("utf-8"))
+
+
+def who(rec):
+    return "ai" if rec.get("imported") and rec["kind"] in ("unii", "tool") else rec["kind"]
+
+
+def show(rec):
+    """Memory.show (no images here)."""
+    return who(rec) + ": " + rec["text"]
+
+
+def clip512(text):
+    """Memory.cut: the first 512 bytes, no broken character."""
+    return text.encode("utf-8")[:NODE].decode("utf-8", "ignore")
 
 
 def tool_text(name, args):
     return name + " " + jdump(args)
 
 
-def pages(text):
-    """Port of clip_pages: split at the last newline within CAP, else at CAP."""
-    out, at = [], 0
-    while True:
-        if len(text) - at <= CAP:
-            end = len(text)
-        else:
-            nl = text.rfind("\n", at, at + CAP)
-            end = nl + 1 if nl >= at else at + CAP
-        out.append(text[at:end])
-        at = end
-        if at >= len(text):
-            return out
-
-
-def msgs_of(kind, text, date):
-    if text.strip() == "":
-        return []
-    ps = pages(text)
-    return [dict(kind=kind, text=p, date=date, more=k < len(ps) - 1) for k, p in enumerate(ps)]
-
-
 def note_for(s):
     return dict(kind="note", text=f"{s.label} session in {s.where}, from {s.start[:16].replace('T', ' ')} (imported)",
-                date=s.start, more=False)
+                date=s.start)
 
 
 def build(sessions, opt):
-    """hermes.Session list -> OutSession list (clipped, escaped)."""
-    outs, esc = [], 0
+    """hermes.Session list -> OutSession list (tool output clipped)."""
+    outs = []
     for s in sessions:
         os_ = OutSession(s.id, f"Hermes (Eris, {s.source})", f"hermes/{s.source}/{s.id}", s.msgs[0].date)
         for m in s.msgs:
             if m.kind == "tool":
-                o = Out("tool", tool_text(m.tool, cut_args(m.args, opt["max_call_chars"])), m.date, m.hid, m.tool,
-                        cut_args(m.args, opt["max_call_chars"]))
+                args = cut_args(m.args, opt["max_call_chars"])
+                o = Out("tool", tool_text(m.tool, args), m.date, m.hid, m.tool, args)
             else:
                 t = cut(m.text, opt["max_tool_chars"]) if m.kind == "echo" else m.text
-                if m.kind in ("user", "unii") and SKIP.match(t):
-                    t, esc = " " + t, esc + 1   # the importer would drop such a text block
                 o = Out(m.kind, t, m.date, m.hid, m.tool)
             if o.text.strip():
                 os_.msgs.append(o)
         outs.append(os_)
-    return outs, esc
+    return outs
 
 
-def body_lines(outs):
-    """The import body: per session a note then its (paged) messages."""
+def records(outs):
+    """Sessions -> Unii message records without positions: per session a note, then its paged messages."""
     for s in outs:
-        yield s.id, note_for(s)
+        yield s.id, dict(note_for(s), imported=True)
         for o in s.msgs:
-            for line in msgs_of(o.kind, o.text, o.date):
-                yield s.id, line
+            ps = pages(well_formed(o.text))
+            for k, p in enumerate(ps):
+                rec = dict(kind=o.kind, text=p, imported=True)
+                if k < len(ps) - 1:
+                    rec["more"] = True
+                rec["date"] = o.date
+                yield s.id, rec
 
 
-def write_body(outs, path):
-    n = 0
-    with open(path, "w", encoding="utf-8") as f:
-        for _, line in body_lines(outs):
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
-            n += 1
-    return n
-
-
-def claude_lines(s):
-    """Claude Code session lines for one session (what line_claude reads)."""
-    base = dict(cwd=s.where, sessionId=s.id, isSidechain=False)
-    for i, o in enumerate(s.msgs):
-        if o.kind == "user":
-            yield dict(base, type="user", timestamp=o.date, message=dict(role="user", content=[dict(type="text", text=o.text)]))
-        elif o.kind == "unii":
-            yield dict(base, type="assistant", timestamp=o.date, message=dict(role="assistant", content=[dict(type="text", text=o.text)]))
-        elif o.kind == "tool":
-            yield dict(base, type="assistant", timestamp=o.date, message=dict(role="assistant", content=[
-                dict(type="tool_use", id=f"h{o.hid}-{i}", name=o.tool, input=o.args)]))
-        else:
-            yield dict(base, type="user", timestamp=o.date, message=dict(role="user", content=[
-                dict(type="tool_result", tool_use_id=f"h{o.hid}-{i}", content=o.text)]))
-
-
-def write_claude(outs, root):
-    root = Path(root)
-    n = 0
-    for s in outs:
-        d = root / "projects" / "-hermes-eris"
-        d.mkdir(parents=True, exist_ok=True)
-        with open(d / f"{s.id}.jsonl", "w", encoding="utf-8") as f:
-            for line in claude_lines(s):
-                f.write(json.dumps(line, ensure_ascii=False) + "\n")
-                n += 1
-    return n
-
-
-def read_claude(root):
-    """Port of line_claude/blocks_msgs: what Unii's importer would make of the files."""
-    got = {}
-    for p in sorted(Path(root).glob("projects/*/*.jsonl")):
-        msgs, date = [], ""
-        for line in p.read_text(encoding="utf-8").splitlines():
-            j = json.loads(line)
-            date = j["timestamp"]
-            c = j["message"]["content"]
-            kind = "user" if j["type"] == "user" else "unii"
-            say = [b for b in c if b["type"] == "text" and not SKIP.match(b["text"])]
-            msgs += msgs_of(kind, "".join(b["text"] for b in say), date)
-            for b in c:
-                if b["type"] == "tool_use":
-                    msgs += msgs_of("tool", b["name"] + " " + jdump(b["input"]), date)
-                elif b["type"] == "tool_result":
-                    msgs += msgs_of("echo", b["content"], date)
-        got[p.stem] = msgs
-    return got
-
-
-# ---- the importer's cost guess (import_guess / node_usd), to say what compaction will cost
+# ---- the importer's cost guess (import_guess / node_usd / node_line / node_merge)
 def _usd(node):
     if node[0] <= NODE:
         return 0
     return round(PRICE["base"] + PRICE["byte"] * math.log2(node[0] / NODE) + PRICE["depth"] * (node[1] + 1))
 
 
-def guess_usd(a, sizes):
+def guess(a, sizes):
+    """Per level, per node, micro-dollars; sizes = leaf source bytes of messages a, a+1, ..."""
     nodes = [(b, 0) for b in sizes]
-    total, i, l = 0, a, 0
+    levels, i, l = [], a, 0
     while nodes:
-        total += sum(_usd(n) for n in nodes)
+        levels.append([_usd(n) for n in nodes])
 
-        def line(k, nodes=nodes, i=i, l=l):
+        def line(k, nodes=nodes, l=l):
             if k < 0:
                 return (LINE, l)
             n = nodes[k]
@@ -208,8 +182,8 @@ def guess_usd(a, sizes):
                   max(line(2 * (frm + j) - i)[1], line(2 * (frm + j) + 1 - i)[1])) for j in range(cnt)]
         i //= 2
         l += 1
-    return total / 1e6
+    return levels
 
 
-def size(kind, text):
-    return len((kind + ": " + text).encode("utf-8"))
+def guess_usd(a, sizes):
+    return sum(sum(x) for x in guess(a, sizes)) / 1e6
