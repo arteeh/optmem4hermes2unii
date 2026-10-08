@@ -2,7 +2,7 @@
 
 Both are already implied by the raw messages (the agent wrote LOG entries through
 optmem_note calls), so they are off by default. They become small extra sessions
-of Eris' own notes ("unii" kind, shown by Unii as "ai").
+of the agent's own notes ("unii" kind, shown by Unii as "ai").
 """
 import json
 import re
@@ -35,7 +35,7 @@ def note_times(data_dir):
     return out
 
 
-def log_session(data_dir, source="Hermes", agent="Eris"):
+def log_session(data_dir, source="Hermes", agent="agent"):
     p = Path(data_dir).expanduser() / "optmem_memory" / "LOG.txt"
     if not p.exists():
         return None, {}
@@ -62,7 +62,7 @@ def log_session(data_dir, source="Hermes", agent="Eris"):
     return s, dict(entries=len(msgs), dated_from_messages=len(msgs) - fallback, dated_by_day_only=fallback)
 
 
-def tree_session(data_dir, level, source="Hermes", agent="Eris"):
+def tree_session(data_dir, level, source="Hermes", agent="agent"):
     p = Path(data_dir).expanduser() / "optmem_memory" / "TREE" / str(level)
     if not p.exists():
         raise SystemExit(f"no TREE level {level} in {p.parent}")

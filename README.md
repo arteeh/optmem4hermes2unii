@@ -13,11 +13,11 @@ Studied on UniiChat v1.0.137 (its JS, read-only). Another Unii version may store
 
 ```
 # 1. everything on a copy of the store, in ./out (the store itself is only read)
-python3 -m optmem4hermes2unii dry-run --hermes ~/Projects/hermes/data --store ~/.opt/users/1 --out ./out
+python3 -m optmem4hermes2unii dry-run --hermes /path/to/hermes/data --store ~/.opt/users/1 --out ./out
 
 # 2. for real: stop Unii, apply (backup first), start Unii
 systemctl --user stop unii-serve.service unii.service
-python3 -m optmem4hermes2unii apply --hermes ~/Projects/hermes/data --store ~/.opt/users/1 --live
+python3 -m optmem4hermes2unii apply --hermes /path/to/hermes/data --store ~/.opt/users/1 --live
 systemctl --user start unii-serve.service unii.service
 # 3. in the web UI the import shows as paused, with its cost: press Resume (terminal: /import resume)
 
@@ -37,7 +37,7 @@ arguments, default 2000), `--keep-gateway` (keep Hermes' Discord origin headers)
 messages dated after the first Unii message: keep them just before the Unii chat, or drop them), `--free-leaves` (see
 cost), `--start` (summaries start as soon as Unii starts instead of paused), `--filler-summaries true|false`
 (write the summary lines over the alignment fillers ourselves, free; default true), `--source-name NAME` and
-`--agent-name NAME` (how the session notes and the boundary note name the app and the agent; default `Hermes`, `Eris`).
+`--agent-name NAME` (how the session notes and the boundary note name the app and the agent; default `Hermes`, `agent`).
 Yes/no options take `true|false` (or nothing, meaning true): e.g. `--free-leaves true --start false`.
 
 ## How it works
@@ -53,7 +53,7 @@ compaction recaps and empty rows are dropped), in Hermes id order, each message 
 | assistant tool call | `tool` (`ai` too): `<name> <compact JSON args>` |
 | tool result, background-process notice | `echo` |
 
-Each session starts with a `note` ("Hermes (Eris, discord) session in ..., from ... (imported)"). Texts over 30000
+Each session starts with a `note` ("Hermes (agent, discord) session in ..., from ... (imported)"). Texts over 30000
 UTF-16 units are paged like Unii does (`more: true`). optmem's own summary tree does not line up with Unii's binary
 tree, so it is not spliced in (it can be added as notes with `--with-tree`).
 
@@ -84,4 +84,4 @@ merges above them are still made by the model, which also sees the full messages
 - `out/store/`: the copied store with the Hermes history in it (what `apply` would leave)
 - `out/report.md`: counts, placement, late messages, cost estimate, checks, first records
 
-Nothing in `out/` is committed (it holds your real conversations).
+`out/` holds your real conversations: do not commit it (it is in `.gitignore`).

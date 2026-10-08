@@ -96,7 +96,7 @@ class Store:
             p.append("the last message is an unfinished page/import (more: true)")
         if self.batch:
             p.append("an import is under way (import.json): let it finish first")
-        if any(r.get("imported") and r["kind"] == "note" and (MARK in r["text"] or "Hermes (Eris" in r["text"])
+        if any(r.get("imported") and r["kind"] == "note" and (MARK in r["text"] or "Hermes (" in r["text"])
                for _, r in self.main.values()):
             p.append("a history was already imported into this store by optmem4hermes2unii")
         bad = [k for k in self.tree if k[1] * 2 ** k[0] + 2 ** k[0] > self.count]
@@ -108,7 +108,7 @@ class Store:
         return max((l for l, _ in self.tree), default=0)
 
 
-def plan(store, hermes_recs, free_leaves=False, filler_summaries=True, source="Hermes", agent="Eris"):
+def plan(store, hermes_recs, free_leaves=False, filler_summaries=True, source="Hermes", agent="agent"):
     """-> dict with all new records and facts. hermes_recs: records from unii.records (no i/size)."""
     M = store.count
     L = store.top_level()

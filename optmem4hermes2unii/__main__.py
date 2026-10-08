@@ -228,8 +228,8 @@ def main(argv=None):
                        help="let the import's summaries start at once (default: false, paused)")
         x.add_argument("--source-name", default="Hermes",
                        help="name of the app the history comes from, used in session notes and the boundary note (default: Hermes)")
-        x.add_argument("--agent-name", default="Eris",
-                       help="name of the agent whose history it is (default: Eris)")
+        x.add_argument("--agent-name", default="agent",
+                       help="name of the agent whose history it is (default: agent)")
     d = sub.add_parser("dry-run", help="do it all on a copy of the store in --out")
     common(d)
     d.add_argument("--out", default="./out")
