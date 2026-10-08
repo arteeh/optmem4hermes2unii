@@ -35,7 +35,10 @@ Options: `--max-tool-chars N` (cut tool results, default 4000, 0 = no cut), `--m
 arguments, default 2000), `--keep-gateway` (keep Hermes' Discord origin headers), `--with-log` / `--with-tree LEVEL`
 (optmem `LOG.txt` / `TREE/LEVEL` as a small extra session at the end of the Hermes part), `--late keep|drop` (Hermes
 messages dated after the first Unii message: keep them just before the Unii chat, or drop them), `--free-leaves` (see
-cost), `--start` (summaries start as soon as Unii starts instead of paused).
+cost), `--start` (summaries start as soon as Unii starts instead of paused), `--filler-summaries true|false`
+(write the summary lines over the alignment fillers ourselves, free; default true), `--source-name NAME` and
+`--agent-name NAME` (how the session notes and the boundary note name the app and the agent; default `Hermes`, `Eris`).
+Yes/no options take `true|false` (or nothing, meaning true): e.g. `--free-leaves true --start false`.
 
 ## How it works
 

@@ -35,7 +35,7 @@ def note_times(data_dir):
     return out
 
 
-def log_session(data_dir):
+def log_session(data_dir, source="Hermes", agent="Eris"):
     p = Path(data_dir).expanduser() / "optmem_memory" / "LOG.txt"
     if not p.exists():
         return None, {}
@@ -58,16 +58,16 @@ def log_session(data_dir):
         msgs.append(Out("unii", f"optmem #{n} ({day}): {text}", _iso(ts), hid=n))
     if not msgs:
         return None, {}
-    s = OutSession("optmem-log", "Hermes (Eris) optmem", "hermes/optmem/LOG", msgs[0].date, msgs)
+    s = OutSession("optmem-log", f"{source} ({agent}) optmem", f"{source.lower()}/optmem/LOG", msgs[0].date, msgs)
     return s, dict(entries=len(msgs), dated_from_messages=len(msgs) - fallback, dated_by_day_only=fallback)
 
 
-def tree_session(data_dir, level):
+def tree_session(data_dir, level, source="Hermes", agent="Eris"):
     p = Path(data_dir).expanduser() / "optmem_memory" / "TREE" / str(level)
     if not p.exists():
         raise SystemExit(f"no TREE level {level} in {p.parent}")
     ts = p.stat().st_mtime
     msgs = [Out("unii", f"optmem summary (level {level}, #{k}): {line.strip()}", _iso(ts), hid=k)
             for k, line in enumerate(p.read_text(encoding="utf-8").splitlines()) if line.strip()]
-    return OutSession(f"optmem-tree-{level}", "Hermes (Eris) optmem", f"hermes/optmem/TREE/{level}", msgs[0].date, msgs), dict(
+    return OutSession(f"optmem-tree-{level}", f"{source} ({agent}) optmem", f"{source.lower()}/optmem/TREE/{level}", msgs[0].date, msgs), dict(
         level=level, nodes=len(msgs), dated="file mtime (the tree has no per-node dates)")

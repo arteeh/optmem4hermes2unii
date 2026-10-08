@@ -30,7 +30,8 @@ from pathlib import Path
 from . import unii
 
 SLOT = 16
-BOUNDARY = "Hermes history import ends here (optmem4hermes2unii). Messages 0-{last} are Eris' (Hermes) history, " \
+MARK = "(optmem4hermes2unii)"
+BOUNDARY = "{source} history import ends here " + MARK + ". Messages 0-{last} are {agent}'s ({source}) history, " \
            "imported in date order; the UniiChat chat goes on from message {n}. Ids written in messages and " \
            "summaries from before this import count from 0 at message {n}: add {n} to them."
 FILLER = "(empty: keeps the summary tree aligned)"
@@ -95,8 +96,9 @@ class Store:
             p.append("the last message is an unfinished page/import (more: true)")
         if self.batch:
             p.append("an import is under way (import.json): let it finish first")
-        if any(r.get("imported") and r["kind"] == "note" and "Hermes (Eris" in r["text"] for _, r in self.main.values()):
-            p.append("Hermes history was already imported into this store")
+        if any(r.get("imported") and r["kind"] == "note" and (MARK in r["text"] or "Hermes (Eris" in r["text"])
+               for _, r in self.main.values()):
+            p.append("a history was already imported into this store by optmem4hermes2unii")
         bad = [k for k in self.tree if k[1] * 2 ** k[0] + 2 ** k[0] > self.count]
         if bad:
             p.append(f"summary lines past the last message: {bad[:5]}")
@@ -106,7 +108,7 @@ class Store:
         return max((l for l, _ in self.tree), default=0)
 
 
-def plan(store, hermes_recs, free_leaves=False):
+def plan(store, hermes_recs, free_leaves=False, filler_summaries=True, source="Hermes", agent="Eris"):
     """-> dict with all new records and facts. hermes_recs: records from unii.records (no i/size)."""
     M = store.count
     L = store.top_level()
@@ -124,7 +126,7 @@ def plan(store, hermes_recs, free_leaves=False):
         new.append(rec)
     for k in range(pad):
         new.append(dict(kind="note", text=FILLER, imported=True, date=last_date))
-    new.append(dict(kind="note", text=BOUNDARY.format(last=N - 1, n=N), imported=True, date=last_date))
+    new.append(dict(kind="note", text=BOUNDARY.format(last=N - 1, n=N, source=source, agent=agent), imported=True, date=last_date))
 
     main = []                          # (day name, rec) in position order
     free_lines = 0
@@ -157,7 +159,7 @@ def plan(store, hermes_recs, free_leaves=False):
     # lines over fillers only: written here, so they cost nothing and read as one line
     fa, fz = H, H + pad                # filler positions fa .. fz-1
     tday = local_day(last_date)
-    for l in range(0, 31):
+    for l in range(0, 31 if filler_summaries else 0):
         n = 2 ** l
         if n > pad:
             break

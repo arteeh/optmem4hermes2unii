@@ -18,17 +18,18 @@ from . import hermes, optmem, store, unii
 def hermes_records(a):
     sessions, st = hermes.load(a.hermes, keep_gateway=a.keep_gateway)
     hermes.assign_dates(sessions, st)
-    outs = unii.build(sessions, dict(max_tool_chars=a.max_tool_chars, max_call_chars=a.max_call_chars))
+    outs = unii.build(sessions, dict(max_tool_chars=a.max_tool_chars, max_call_chars=a.max_call_chars,
+                                     source=a.source_name, agent=a.agent_name))
     outs.sort(key=lambda s: (s.start, s.id))
     extras = {}
     if a.with_log:
-        s, info = optmem.log_session(a.hermes)
+        s, info = optmem.log_session(a.hermes, a.source_name, a.agent_name)
         if s:
             s.extra = True
             outs.append(s)
             extras["LOG.txt"] = info
     if a.with_tree:
-        s, info = optmem.tree_session(a.hermes, a.with_tree)
+        s, info = optmem.tree_session(a.hermes, a.with_tree, a.source_name, a.agent_name)
         s.extra = True
         outs.append(s)
         extras[f"TREE/{a.with_tree}"] = info
@@ -47,7 +48,8 @@ def run(a, dest, live):
     late = [r for r in recs if first_ours and r["date"] > first_ours]
     if late and a.late == "drop":
         recs = [r for r in recs if not (first_ours and r["date"] > first_ours)]
-    p = store.plan(before, recs, free_leaves=a.free_leaves)
+    p = store.plan(before, recs, free_leaves=a.free_leaves, filler_summaries=a.filler_summaries,
+                   source=a.source_name, agent=a.agent_name)
     store.write(p, dest, start=a.start)
     probs, facts = store.verify(dest, before, p)
 
@@ -79,7 +81,8 @@ def run(a, dest, live):
         w(f"| {s.id} | {len(s.msgs)} | {dict(c)} | {s.msgs[0].date} | {s.msgs[-1].date} |")
     w("")
     w("## Placement (date order, no summary of ours rewritten)")
-    w(f"- Hermes records (notes + pages): {p['H']} at positions 0-{p['H'] - 1}; {p['pad']} empty alignment notes; "
+    w(f"- Hermes records (notes + pages): {p['H']} at positions 0-{p['H'] - 1}; {p['pad']} empty alignment notes "
+      f"({'their summary lines written, free' if a.filler_summaries else 'left to the compactor (--filler-summaries false)'}); "
       f"boundary note at {p['N'] - 1}")
     w(f"- our {p['M']} messages move from 0-{p['M'] - 1} to {p['N']}-{p['N'] + p['M'] - 1}; "
       f"N = {p['N']} is a multiple of 2^{p['L']} = {p['align']} (our highest summary level), so all "
@@ -193,6 +196,15 @@ def verify(a):
     return 1 if probs else 0
 
 
+def flag(x):
+    v = str(x).strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    raise argparse.ArgumentTypeError(f"expected true or false, not {x!r}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="optmem4hermes2unii", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -208,9 +220,16 @@ def main(argv=None):
         x.add_argument("--with-tree", type=int, metavar="LEVEL", help="add optmem TREE/LEVEL summaries as a small extra session")
         x.add_argument("--late", choices=("keep", "drop"), default="keep",
                        help="Hermes messages dated after the first Unii message: keep them (before ours) or drop them")
-        x.add_argument("--free-leaves", action="store_true",
+        x.add_argument("--free-leaves", type=flag, nargs="?", const=True, default=False, metavar="true|false",
                        help="give long Hermes messages their first 512 bytes as summary line (no compactor call for them)")
-        x.add_argument("--start", action="store_true", help="let the import's summaries start at once (default: paused)")
+        x.add_argument("--filler-summaries", type=flag, nargs="?", const=True, default=True, metavar="true|false",
+                       help="write the summary lines over the alignment fillers ourselves, free (default: true)")
+        x.add_argument("--start", type=flag, nargs="?", const=True, default=False, metavar="true|false",
+                       help="let the import's summaries start at once (default: false, paused)")
+        x.add_argument("--source-name", default="Hermes",
+                       help="name of the app the history comes from, used in session notes and the boundary note (default: Hermes)")
+        x.add_argument("--agent-name", default="Eris",
+                       help="name of the agent whose history it is (default: Eris)")
     d = sub.add_parser("dry-run", help="do it all on a copy of the store in --out")
     common(d)
     d.add_argument("--out", default="./out")

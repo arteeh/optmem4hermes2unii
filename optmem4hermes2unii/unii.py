@@ -128,8 +128,9 @@ def note_for(s):
 def build(sessions, opt):
     """hermes.Session list -> OutSession list (tool output clipped)."""
     outs = []
+    src, agent = opt.get("source", "Hermes"), opt.get("agent", "Eris")
     for s in sessions:
-        os_ = OutSession(s.id, f"Hermes (Eris, {s.source})", f"hermes/{s.source}/{s.id}", s.msgs[0].date)
+        os_ = OutSession(s.id, f"{src} ({agent}, {s.source})", f"{src.lower()}/{s.source}/{s.id}", s.msgs[0].date)
         for m in s.msgs:
             if m.kind == "tool":
                 args = cut_args(m.args, opt["max_call_chars"])
